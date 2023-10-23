@@ -1,0 +1,94 @@
+trigger:
+  branches:
+    include:
+      - develop
+
+variables:
+  dockerRegistryServiceConnection: 'svc-connection'
+  DEVImageRepository: 'image/repo-name/build-dev'
+  containerRegistry: 'acr.azurecr.io'
+  dockerfilePath: '**/Dockerfile'
+  tag: '$(Build.BuildId)'
+
+  # Agent VM image name
+  vmImageName: 'ubuntu-latest'
+
+stages:
+  - stage: BuildDEV
+    condition: and(always(), contains(variables['Build.SourceBranch'], 'refs/heads/develop'))
+    displayName: DEV
+    jobs:
+      - job: Build
+        displayName: Build
+        pool:
+          vmImage: $(vmImageName)
+        steps:
+
+          - task: AzureKeyVault@2
+            inputs:
+              azureSubscription: 'Enterprise Core (ce6767-8409-0f1bde1e8256)'
+              KeyVaultName: 'kv-dev-vault'
+              SecretsFilter: '*'
+              RunAsPreJob: false
+
+          - task: replacetokens@3
+            inputs:
+              targetFiles: |
+                **/*development.yaml
+                **/*dev.properties
+              encoding: 'auto'
+              writeBOM: true
+              actionOnMissing: 'warn'
+              keepToken: false
+              tokenPrefix: '#{'
+              tokenSuffix: '}#'
+              useLegacyPattern: false
+              enableTransforms: false
+              enableTelemetry: true
+
+          - task: DownloadSecureFile@1
+            name: rsaprivkey
+            inputs:
+              secureFile: rsaprivkey.der
+
+          - task: DownloadSecureFile@1
+            name: rsapubkey
+            inputs:
+              secureFile: rsapubkey.der
+
+          - task: Maven@3
+            inputs:
+              mavenPomFile: 'pom.xml'
+              options: '-Dspring.profiles.active=$(DEV_SPRING_PROFILES_ACTIVE)'
+              publishJUnitResults: true
+              testResultsFiles: '**/surefire-reports/TEST-*.xml'
+              javaHomeOption: 'JDKVersion'
+              mavenVersionOption: 'Default'
+              mavenAuthenticateFeed: false
+              effectivePomSkip: false
+              sonarQubeRunAnalysis: false
+
+          - task: CopyFiles@2
+            inputs:
+              SourceFolder: '$(system.defaultworkingdirectory)'
+              Contents: |
+                **/*development.yaml
+                **/*dev.properties
+              TargetFolder: '$(build.artifactstagingdirectory)'
+
+          - task: PublishBuildArtifacts@1
+            inputs:
+              PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+              ArtifactName: 'dev_drop'
+              publishLocation: 'Container'
+
+          - task: Docker@2
+            displayName: Build and push an image to container registry
+            inputs:
+              command: buildAndPush
+              repository: $(DEVImageRepository)
+              dockerfile: $(dockerfilePath)
+              containerRegistry: $(dockerRegistryServiceConnection)
+              tags: |
+                $(tag)
+                latest

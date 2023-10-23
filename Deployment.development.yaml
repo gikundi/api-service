@@ -1,0 +1,100 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-service-v1-deployment
+spec:
+  replicas: 1
+  minReadySeconds: 10
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+  template:
+    metadata:
+      name: api-service-v1
+      labels:
+        app: api-service-v1
+    spec:
+      containers:
+        - name: pi-service-v1
+          image: acr.azurecr.io/development/api-service/build-dev:#{Build.BuildId}#
+          imagePullPolicy: Always
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "200m"
+          ports:
+            - containerPort: 8082
+          env:
+            - name: SPRING_PROFILE
+              value: dev
+            - name: SQL_SERVER_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: sql-server-credentials
+                  key: SQL_SERVER_NAME
+            - name: SQL_SERVER_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: sql-server-credentials
+                  key: SQL_SERVER_USERNAME
+            - name: CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: client-credentials
+                  key: CLIENT_ID
+            - name: CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: client-credentials
+                  key: CLIENT_SECRET
+            - name: SQL_SERVER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: sql-server-credentials
+                  key: SQL_SERVER_PASSWORD
+            - name: EVENTHUB_HOSTNAME
+              valueFrom:
+                secretKeyRef:
+                  name: eventhub-credentials
+                  key: EVENTHUB_HOSTNAME
+          volumeMounts:
+            - name: secrets-store-inline
+              mountPath: "/mnt/secrets-store"
+              readOnly: true
+      volumes:
+        - name: secrets-store-inline
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: "kv-dev-vault"
+            nodePublishSecretRef:
+              name: secrets-store-creds
+      imagePullSecrets:
+        - name: default-token-tzf4h
+
+  selector:
+    matchLabels:
+      app: api-service-v1
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-service-v1-service
+  annotations:
+    service.beta.kubernetes.io/azure-load-balancer-internal: "true"
+spec:
+  type: LoadBalancer
+  ports:
+    - port: 8082
+  selector:
+    app: api-service-v1
+
+---
